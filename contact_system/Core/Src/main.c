@@ -69,6 +69,15 @@ int codeVerTest = 4;
 #define MACRO_LED_RED_CLR {GPIOB->BSRR = (uint32_t)GPIO_PIN_14 << 16U; }
 
 
+#define MACRO_CIS_LED_RED_SET {GPIOE->BSRR = GPIO_PIN_4; }
+#define MACRO_CIS_LED_RED_CLR {GPIOE->BSRR = (uint32_t)GPIO_PIN_4 << 16U; }
+#define MACRO_CIS_LED_GREEN_SET {GPIOE->BSRR = GPIO_PIN_2; }
+#define MACRO_CIS_LED_GREEN_CLR {GPIOE->BSRR = (uint32_t)GPIO_PIN_2 << 16U; }
+#define MACRO_CIS_LED_BLUE_SET {GPIOE->BSRR = GPIO_PIN_5; }
+#define MACRO_CIS_LED_BLUE_CLR {GPIOE->BSRR = (uint32_t)GPIO_PIN_5 << 16U; }
+
+
+
 // AD9826 REGISTERS DEFINITION
 #define R_CFG_ADDR       0x0000
 #define R_MUXCFG_ADDR    0x1000
@@ -161,11 +170,18 @@ char strCMD_6[] = "ROFST";
 char strCMD_7[] = "GOFST";
 char strCMD_8[] = "BOFST";
 
+char strCMD_9[] = "LEDRED";
+char strCMD_10[] = "LEDGREEN";
+char strCMD_11[] = "LEDBLUE";
+
 char enableSampleTimerFlag = 0;
 
+unsigned char send_data_main = 0;
+
 unsigned int encoder_tick = 0, pixel_values[5184] = {0};
-unsigned int LEDR_time, LEDG_time, LEDB_time, exposureTime_phase, LEDR_phase, LEDG_phase, LEDB_phase, LEDR_residual, LEDG_residual, LEDB_residual;
-unsigned char get_image = 0, send_data_main = 0;
+//unsigned int LEDR_time, LEDG_time, LEDB_time, exposureTime_phase, LEDR_phase, LEDG_phase, LEDB_phase, LEDR_residual, LEDG_residual, LEDB_residual;
+unsigned char get_image = 0;
+
 float encoder_resolution, encoder_distance;
 
 uint32_t odr;
@@ -199,7 +215,7 @@ int ADC_B7 = 0;
 
 
 //-Flags
-short int flag_ExpAndRead = 1;
+//short int flag_ExpAndRead = 1;
 
 
 /* USER CODE END 0 */
@@ -214,70 +230,74 @@ int main(void)
 
   expDuration_us = 6*(int)(exposureVal/60);
 
-  unsigned int exposure_time;
-
-  // AD9826 instructions - Serial communication (SPI)
-//  const unsigned int config_reg =  0b0000000011101000;
-  //const unsigned int MUX_config_reg = 0b000100001110000; // original missing one bit
-//  const unsigned int MUX_config_reg = 0b0001000011110000;
-
-  unsigned int red_PGA_reg, green_PGA_reg, blue_PGA_reg, red_offset_reg, green_offset_reg, blue_offset_reg;
-  unsigned int offset_red, offset_green, offset_blue;
-  unsigned char gain_red, gain_green, gain_blue;
-
-
   uint8_t singlePx_value[TOTAL_PIXELS*2]; //*2 since the USB 8 bit at a time
   unsigned int organizeDataToSend = 0;
-  int idxUSB,idx;
-  /* Data settings */
-  /***********************************************************************************************************/
+  int idxUSB;
+  int idx;
 
-  encoder_resolution = 0.1;   // in [um]
-  encoder_distance = 0.5; // in [um] -> (0.5 [um] = 5 tick)
 
-  // Timing - Integration time of the CIS
-  // (1) Resolution of 10 [us] [it depends on the timer frequency (1/timer_freq)]
-  // (2) Maximum error of 50 [us] [it depends on the time difference respect to the rising edge of the CDSCLK2 (CP) signal]
-  exposure_time = 1000;   // in [us]
+//  unsigned int exposure_time;
+//
+//  // AD9826 instructions - Serial communication (SPI)
+////  const unsigned int config_reg =  0b0000000011101000;
+//  //const unsigned int MUX_config_reg = 0b000100001110000; // original missing one bit
+////  const unsigned int MUX_config_reg = 0b0001000011110000;
+//
+//  unsigned int red_PGA_reg, green_PGA_reg, blue_PGA_reg, red_offset_reg, green_offset_reg, blue_offset_reg;
+//  unsigned int offset_red, offset_green, offset_blue;
+//  unsigned char gain_red, gain_green, gain_blue;
+//
+//
 
-  // Timing - LED duration
-  // (1) Resolution of 10 [us] [it depends on the timer frequency (1/timer_freq)]
-  LEDR_time = 0;  // in [us]
-  LEDG_time = 0;  // in [us]
-  LEDB_time = 0;  // in [us]
-
-  // Input gain - From 0 (gain = 1) to 63 (gain = 6)
-  gain_red = 0;
-  gain_green = 0;
-  gain_blue = 0;
-
-  // Input offset - From 0 (0 [mV]) to 255 (+300 [mV]) or from 256 (0 [mV]) to 511 (-300 [mV])
-  offset_red = 0;
-  offset_green = 0;
-  offset_blue = 0;
-
-  /***********************************************************************************************************/
-
-  // ADC gain
-  red_PGA_reg = 0b0010000000000000 | gain_red;
-  green_PGA_reg = 0b0011000000000000 | gain_green;
-  blue_PGA_reg = 0b0100000000000000 | gain_blue;
-
-  // ADC offset
-  red_offset_reg = 0b0101000000000000 | offset_red;
-  green_offset_reg = 0b0110000000000000 | offset_green;
-  blue_offset_reg = 0b0111000000000000 | offset_blue;
-
-  // Number of multiplexing phases
-  exposureTime_phase = (unsigned int)(((exposure_time / 1000000.0) * timer_freq) / 6.0);
-  LEDR_phase = (unsigned int)(((LEDR_time / 1000000.0) * timer_freq) / 6.0);
-  LEDG_phase = (unsigned int)(((LEDG_time / 1000000.0) * timer_freq) / 6.0);
-  LEDB_phase = (unsigned int)(((LEDB_time / 1000000.0) * timer_freq) / 6.0);
-
-  // Number of residual ticks
-  LEDR_residual = (unsigned int)((LEDR_time / 1000000.0) * timer_freq) % 6 + 1;
-  LEDG_residual = (unsigned int)((LEDG_time / 1000000.0) * timer_freq) % 6 + 1;
-  LEDB_residual = (unsigned int)((LEDB_time / 1000000.0) * timer_freq) % 6 + 1;
+//  /* Data settings */
+//  /***********************************************************************************************************/
+//
+//  encoder_resolution = 0.1;   // in [um]
+//  encoder_distance = 0.5; // in [um] -> (0.5 [um] = 5 tick)
+//
+//  // Timing - Integration time of the CIS
+//  // (1) Resolution of 10 [us] [it depends on the timer frequency (1/timer_freq)]
+//  // (2) Maximum error of 50 [us] [it depends on the time difference respect to the rising edge of the CDSCLK2 (CP) signal]
+//  exposure_time = 1000;   // in [us]
+//
+//  // Timing - LED duration
+//  // (1) Resolution of 10 [us] [it depends on the timer frequency (1/timer_freq)]
+//  LEDR_time = 0;  // in [us]
+//  LEDG_time = 0;  // in [us]
+//  LEDB_time = 0;  // in [us]
+//
+//  // Input gain - From 0 (gain = 1) to 63 (gain = 6)
+//  gain_red = 0;
+//  gain_green = 0;
+//  gain_blue = 0;
+//
+//  // Input offset - From 0 (0 [mV]) to 255 (+300 [mV]) or from 256 (0 [mV]) to 511 (-300 [mV])
+//  offset_red = 0;
+//  offset_green = 0;
+//  offset_blue = 0;
+//
+//  /***********************************************************************************************************/
+//
+//  // ADC gain
+//  red_PGA_reg = 0b0010000000000000 | gain_red;
+//  green_PGA_reg = 0b0011000000000000 | gain_green;
+//  blue_PGA_reg = 0b0100000000000000 | gain_blue;
+//
+//  // ADC offset
+//  red_offset_reg = 0b0101000000000000 | offset_red;
+//  green_offset_reg = 0b0110000000000000 | offset_green;
+//  blue_offset_reg = 0b0111000000000000 | offset_blue;
+//
+//  // Number of multiplexing phases
+//  exposureTime_phase = (unsigned int)(((exposure_time / 1000000.0) * timer_freq) / 6.0);
+//  LEDR_phase = (unsigned int)(((LEDR_time / 1000000.0) * timer_freq) / 6.0);
+//  LEDG_phase = (unsigned int)(((LEDG_time / 1000000.0) * timer_freq) / 6.0);
+//  LEDB_phase = (unsigned int)(((LEDB_time / 1000000.0) * timer_freq) / 6.0);
+//
+//  // Number of residual ticks
+//  LEDR_residual = (unsigned int)((LEDR_time / 1000000.0) * timer_freq) % 6 + 1;
+//  LEDG_residual = (unsigned int)((LEDG_time / 1000000.0) * timer_freq) % 6 + 1;
+//  LEDB_residual = (unsigned int)((LEDB_time / 1000000.0) * timer_freq) % 6 + 1;
 
   /* USER CODE END 1 */
 
@@ -476,6 +496,55 @@ int main(void)
         }
         memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
       }
+
+
+      if(strcmp(token,strCMD_9) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal == 1)
+        {
+          MACRO_CIS_LED_RED_SET
+        }
+        else
+        {
+          MACRO_CIS_LED_RED_CLR
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+      if(strcmp(token,strCMD_10) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal == 1)
+        {
+          MACRO_CIS_LED_GREEN_SET
+        }
+        else
+        {
+          MACRO_CIS_LED_GREEN_CLR
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+      if(strcmp(token,strCMD_11) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal == 1)
+        {
+          MACRO_CIS_LED_BLUE_SET
+        }
+        else
+        {
+          MACRO_CIS_LED_BLUE_CLR
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+
 
 
 
