@@ -64,8 +64,8 @@ all: main-build
 main-build: contact_system.elf secondary-outputs
 
 # Tool invocations
-contact_system.elf contact_system.map: $(OBJS) $(USER_OBJS) /Users/armandorivero/STM32CubeIDE/workspace_1.8.0/contact_system/STM32H723ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "contact_system.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"/Users/armandorivero/STM32CubeIDE/workspace_1.8.0/contact_system/STM32H723ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="contact_system.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+contact_system.elf contact_system.map: $(OBJS) $(USER_OBJS) /Users/armandorivero/Documents/GitHub/TexPro/contact_system/STM32H723ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "contact_system.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"/Users/armandorivero/Documents/GitHub/TexPro/contact_system/STM32H723ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="contact_system.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

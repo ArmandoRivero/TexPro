@@ -18,7 +18,7 @@
 
 // Authors: Christian Valles, Armando Rivero, Sebastiano Marinelli
 // Date of modification: 2/09/2022
-// Version 1.3
+// Version 1.4
 
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -39,12 +39,81 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+int codeVer = 1;
+int codeVerTest = 4;
+
 #define timer_freq 100000 // in [Hz]
 #define VCP_BUFF_SIZE 100000
 
 #define EFFECTIVE_PIXELS 1728
 #define TOTAL_PIXELS EFFECTIVE_PIXELS *3 //5184
 #define INATIVE_PIXELS 38+1+1  // 38 are inactive 2 are found during measurements
+
+// MACRO DEFINITIONS FOR CIS
+#define MACRO_CIS_SET_CPCLK {GPIOD->BSRR = GPIO_PIN_12; }
+#define MACRO_CIS_CLR_CPCLK {GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; }
+
+#define MACRO_CIS_SET_SP {GPIOD->BSRR = GPIO_PIN_11; }
+#define MACRO_CIS_CLR_SP {GPIOD->BSRR = (uint32_t)GPIO_PIN_11 << 16U; }
+
+// MACRO DEFINITIONS FOR AFE AD9826
+#define MACRO_AD9826_SET_SCLK {GPIOD->BSRR = GPIO_PIN_14; }
+#define MACRO_AD9826_CLR_SCLK {GPIOD->BSRR = (uint32_t)GPIO_PIN_14 << 16U; }
+
+// ON BOARS LEDS
+#define MACRO_LED_YELLOW_SET {GPIOE->BSRR = GPIO_PIN_1; }
+#define MACRO_LED_YELLOW_CLR {GPIOE->BSRR = (uint32_t)GPIO_PIN_1 << 16U; }
+#define MACRO_LED_GREEN_SET {GPIOB->BSRR = GPIO_PIN_0; }
+#define MACRO_LED_GREEN_CLR {GPIOB->BSRR = (uint32_t)GPIO_PIN_0 << 16U; }
+#define MACRO_LED_RED_SET {GPIOB->BSRR = GPIO_PIN_14; }
+#define MACRO_LED_RED_CLR {GPIOB->BSRR = (uint32_t)GPIO_PIN_14 << 16U; }
+
+
+// AD9826 REGISTERS DEFINITION
+#define R_CFG_ADDR       0x0000
+#define R_MUXCFG_ADDR    0x1000
+#define R_RPGA_ADDR      0x2000
+#define R_GPGA_ADDR      0x3000
+#define R_BPGA_ADDR      0x4000
+#define R_ROFFSET_ADDR   0x5000
+#define R_GOFFSET_ADDR   0x6000
+#define R_BOFFSET_ADDR   0x7000
+
+// register configuration (Addr: 0x0000)
+#define R_CFG_INPUTRNG 0x0080
+#define R_CFG_VREF     0x0040
+#define R_CFG_3CHMODE  0x0020
+#define R_CFG_CDS_ON   0x0010
+#define R_CFG_CLAMP    0x0008
+#define R_CFG_PWRDWN   0x0004
+#define R_CFG_OUTMODE  0x0001
+
+// MUX configuration (Addr: 0x0001)
+#define R_MUXCFG_RGBBGR 0x008
+#define R_MUXCFG_RED    0x004
+#define R_MUXCFG_GREEN  0x002
+#define R_MUXCFG_BLUE   0x001
+
+
+
+
+
+
+//const unsigned int config_reg =  0b0000 0000 1110 1000;
+const unsigned int reg_AD9826_config = R_CFG_ADDR | R_CFG_INPUTRNG | R_CFG_VREF | R_CFG_3CHMODE | R_CFG_CLAMP; //0b0000 0000 1110 1000
+
+//const unsigned int MUX_config_reg = 0b0001 0000 1111 0000;
+const unsigned int reg_AD9826_MUXconfig = R_MUXCFG_ADDR | R_MUXCFG_RGBBGR | R_MUXCFG_RED | R_MUXCFG_GREEN | R_MUXCFG_BLUE;
+
+unsigned int reg_AD9826_redPGA   = R_RPGA_ADDR;
+unsigned int reg_AD9826_greenPGA = R_GPGA_ADDR;
+unsigned int reg_AD9826_bluePGA  = R_BPGA_ADDR;
+
+unsigned int reg_AD9826_redOffset   = R_ROFFSET_ADDR;
+unsigned int reg_AD9826_greenOffset = R_GOFFSET_ADDR;
+unsigned int reg_AD9826_blueOffset  = R_BOFFSET_ADDR;
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -81,13 +150,16 @@ char msgVCP[VCP_BUFF_SIZE];
 int msgVCP_len = 0;
 char* token;
 const char *tokenSeparator = ".\n\r";
+char strCMD_ver[] = "ver";
 char strCMD_1[] = "SingleSample";
 char strCMD_2[] = "cfg";
 char strCMD_2_1[] = "exp";
-char strCMD_2_2[] = "gain";
-char strCMD_2_3[] = "RLED";
-char strCMD_2_4[] = "GLED";
-char strCMD_2_5[] = "BLED";
+char strCMD_3[] = "RPGA";
+char strCMD_4[] = "GPGA";
+char strCMD_5[] = "BPGA";
+char strCMD_6[] = "ROFST";
+char strCMD_7[] = "GOFST";
+char strCMD_8[] = "BOFST";
 
 char enableSampleTimerFlag = 0;
 
@@ -106,7 +178,9 @@ short int ADC_cnt = 0;
 
 // EXPOSURE TIME
 int exposureVal = 120; // in microseconds
-int expDuration_10us = 0 ;
+int tokenVal = 0;
+int expDuration_us = 0 ;
+
 
 int i = 0;
 int alternateByte = 0;
@@ -138,21 +212,22 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
-  expDuration_10us = 6*(int)(exposureVal/60);
+  expDuration_us = 6*(int)(exposureVal/60);
 
   unsigned int exposure_time;
 
   // AD9826 instructions - Serial communication (SPI)
-  const unsigned int config_reg =  0b0000000011101000;
-  //const unsigned int MUX_config_reg = 0b000100001110000;
-  const unsigned int MUX_config_reg = 0b0001000011110000;
+//  const unsigned int config_reg =  0b0000000011101000;
+  //const unsigned int MUX_config_reg = 0b000100001110000; // original missing one bit
+//  const unsigned int MUX_config_reg = 0b0001000011110000;
 
   unsigned int red_PGA_reg, green_PGA_reg, blue_PGA_reg, red_offset_reg, green_offset_reg, blue_offset_reg;
   unsigned int offset_red, offset_green, offset_blue;
   unsigned char gain_red, gain_green, gain_blue;
 
+
   uint8_t singlePx_value[TOTAL_PIXELS*2]; //*2 since the USB 8 bit at a time
-  unsigned int dataToSend = 0;
+  unsigned int organizeDataToSend = 0;
   int idxUSB,idx;
   /* Data settings */
   /***********************************************************************************************************/
@@ -229,39 +304,39 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  /* Setting transmission to AD9826 */
+  /* Configuring AD9826 through SPI*/
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1,(uint8_t *)&reg_AD9826_config, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1,(uint8_t *)&config_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_MUXconfig, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&MUX_config_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_redPGA, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&red_PGA_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_greenPGA, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&green_PGA_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_bluePGA, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&blue_PGA_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_redOffset, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&red_offset_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_greenOffset, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&green_offset_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
+  MACRO_AD9826_CLR_SCLK
+  HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_blueOffset, 1, HAL_MAX_DELAY);
+  MACRO_AD9826_SET_SCLK
 
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, (uint8_t *)&blue_offset_reg, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
 
   //HAL_TIM_Base_Start_IT(&htim2);    // Start timer 2
 
@@ -269,103 +344,200 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  int msgVCP_len = 0;
-  char msgVCP[VCP_BUFF_SIZE];
+
   while (1)
   {
     // tokenize command recevied in CDC_Receive_FS(...) (file: usbd_cdc_ig.c)
-        token = strtok((char*)bufferVCP_Rx,tokenSeparator);
-        if (token != NULL)
+    token = strtok((char*)bufferVCP_Rx,tokenSeparator);
+    if (token != NULL)
+    {
+      if(strcmp(token,strCMD_1) == 0)
+      {
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always after receiving
+
+        enableSampleTimerFlag = 1;
+        HAL_TIM_Base_Start_IT(&htim2);    // Start timer 2
+
+        MACRO_LED_YELLOW_SET
+//        GPIOE->BSRR = GPIO_PIN_1;  // On-board Yellow LED Set to "1"
+      }
+      if(strcmp(token,strCMD_2) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+        if(strcmp(token,strCMD_2_1) == 0)
         {
-          if(strcmp(token,strCMD_1) == 0)
-          {
-            memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always after receiving
+          token = strtok(NULL,tokenSeparator);
 
-            enableSampleTimerFlag = 1;
-            HAL_TIM_Base_Start_IT(&htim2);    // Start timer 2
+          exposureVal = atoi(token);
+          expDuration_us = 6*(int)(exposureVal/15);
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+      if(strcmp(token,strCMD_3) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 63)
+        {
+          reg_AD9826_redPGA &= 0xFFC0;  // clear only gain bits
+          reg_AD9826_redPGA |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_redPGA, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+
+//          msgVCP_len = sprintf(msgVCP, "RPGA %d\n", tokenVal);
+//          CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+      if(strcmp(token,strCMD_4) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 63)
+        {
+          reg_AD9826_greenPGA &= 0xFFC0;  // clear only gain bits
+          reg_AD9826_greenPGA |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_greenPGA, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+      if(strcmp(token,strCMD_5) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 63)
+        {
+          reg_AD9826_bluePGA &= 0xFFC0;  // clear only gain bits
+          reg_AD9826_bluePGA |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_bluePGA, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+      if(strcmp(token,strCMD_6) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 255)
+        {
+          reg_AD9826_redOffset &= 0xFF00;  // clear only gain bits
+          reg_AD9826_redOffset |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_redOffset, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+      if(strcmp(token,strCMD_7) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 255)
+        {
+          reg_AD9826_greenOffset &= 0xFF00;  // clear only gain bits
+          reg_AD9826_greenOffset |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_greenOffset, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+      if(strcmp(token,strCMD_8) == 0)
+      {
+        token = strtok(NULL,tokenSeparator);
+
+        tokenVal = atoi(token);
+        if(tokenVal <= 255)
+        {
+          reg_AD9826_blueOffset &= 0xFF00;  // clear only gain bits
+          reg_AD9826_blueOffset |= tokenVal;
+
+          MACRO_AD9826_CLR_SCLK
+          HAL_SPI_Transmit(&hspi1, (uint8_t *)&reg_AD9826_blueOffset, 1, HAL_MAX_DELAY);
+          MACRO_AD9826_SET_SCLK
+        }
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
 
 
-            GPIOE->BSRR = GPIO_PIN_1;  // On-board Yellow LED Set to "1"
 
-            // Toggle on board Yellow LED
-    //        odr = GPIOE->ODR;
-    //        GPIOE->BSRR = ((odr & GPIO_PIN_1) << 16U) | (~odr & GPIO_PIN_1);
-          }
-          if(strcmp(token,strCMD_2) == 0)
-          {
-            token = strtok(NULL,tokenSeparator);
-            if(strcmp(token,strCMD_2_1) == 0)
-            {
-              token = strtok(NULL,tokenSeparator);
-//              msgVCP_len = sprintf(msgVCP, "exposure time is %s\n",token);
-//              CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
-              exposureVal = atoi(token);
-              expDuration_10us = 6*(int)(exposureVal/15);
-            }
-            memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
-          }
+      if(strcmp(token,strCMD_ver) == 0)
+      {
+        msgVCP_len = sprintf(msgVCP, "Ver: %d.%d\n", codeVer, codeVerTest);
+        CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
+        memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
+      }
+
+    }
+
+
+
+    if(send_data_main)
+    {
+      MACRO_LED_YELLOW_CLR
+//      GPIOE->BSRR = (uint32_t)GPIO_PIN_1 << 16U; // On-board Yellow LED Set to "0"
+
+      HAL_TIM_Base_Stop_IT(&htim2);
+      organizeDataToSend = 0;
+      idxUSB = 0;
+      idx = 0;
+
+
+      while(organizeDataToSend == 0)
+      {
+        //-CH1 (red)
+        singlePx_value[idxUSB]   = reg_High[idx];
+        singlePx_value[idxUSB+1] = reg_Low[idx];
+        //-CH2 (Green)
+        singlePx_value[idxUSB+2] = reg_High[idx+1];
+        singlePx_value[idxUSB+3] = reg_Low[idx+1];
+        //-CH3 (Blue)
+        singlePx_value[idxUSB+4] = reg_High[idx+2];
+        singlePx_value[idxUSB+5] = reg_Low[idx+2];
+
+        idxUSB = idxUSB + 6;
+        idx    = idx + 3;
+
+        if(idx >= TOTAL_PIXELS)
+        {
+          organizeDataToSend = 1;
         }
 
+      }
+      //singlePx_value[TOTAL_PIXELS - 2] = (uint8_t) "\r";
+      //singlePx_value[TOTAL_PIXELS - 1] = (uint8_t) "\n";
+      __NOP();
+      CDC_Transmit_HS(singlePx_value, TOTAL_PIXELS * 2);
+
+      //HAL_Delay(300);
+      //memset(singlePx_value,0,TOTAL_PIXELS * 2);
 
 
-        if(send_data_main)
-        {
-          GPIOE->BSRR = (uint32_t)GPIO_PIN_1 << 16U; // On-board Yellow LED Set to "0"
+      //CDC_Transmit_HS((uint8_t *) "\r\n", 1);
+      HAL_TIM_Base_Start_IT(&htim2);
+      /*HAL_TIM_Base_Stop_IT(&htim2);   // Stop interrupt of TIM2
 
-          HAL_TIM_Base_Stop_IT(&htim2);
-          dataToSend = 0;
-          idxUSB = 0;
-          idx = 0;
-
-
-          while(dataToSend == 0)
-          {
-            //-CH1 (red)
-            singlePx_value[idxUSB]   = reg_High[idx];
-            singlePx_value[idxUSB+1] = reg_Low[idx];
-            //-CH2 (Green)
-            singlePx_value[idxUSB+2] = reg_High[idx+1];
-            singlePx_value[idxUSB+3] = reg_Low[idx+1];
-            //-CH3 (Blue)
-            singlePx_value[idxUSB+4] = reg_High[idx+2];
-            singlePx_value[idxUSB+5] = reg_Low[idx+2];
-
-            idxUSB = idxUSB + 6;
-            idx    = idx + 3;
-
-            if(idx >= TOTAL_PIXELS)
-            {
-              dataToSend = 1;
-            }
-
-          }
-          //singlePx_value[TOTAL_PIXELS - 2] = (uint8_t) "\r";
-          //singlePx_value[TOTAL_PIXELS - 1] = (uint8_t) "\n";
-          __NOP();
-          CDC_Transmit_HS(singlePx_value, TOTAL_PIXELS * 2);
-          //while(USBD_BUSY);
-
-          //HAL_Delay(300);
-          //memset(singlePx_value,0,TOTAL_PIXELS * 2);
-          //CDC_Transmit_HS((uint8_t *)"\n", 1);
-
-
-          //CDC_Transmit_HS((uint8_t *) "\r\n", 1);
-          HAL_TIM_Base_Start_IT(&htim2);
-          /*HAL_TIM_Base_Stop_IT(&htim2);   // Stop interrupt of TIM2
-
-              memset(msgVCP, '\0', msgVCP_len);  // Clear the buffer
-
-              for(unsigned int i = 0; i < 5184; i++) msgVCP_len += sprintf(&msgVCP[msgVCP_len], "%u ", pixel_values[i]);
-              msgVCP_len += sprintf(&msgVCP[msgVCP_len], "\r\n");
-
-              while((CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len)) == USBD_BUSY); // Data transmission
-              msgVCP_len = 0;
-
-              HAL_TIM_Base_Start_IT(&htim2);    // Start interrupt of TIM2
-           */
-          send_data_main = 0;
-        }
+       */
+      send_data_main = 0;
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -790,14 +962,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     //---Toggle CDSCLK2 and CP_Clk: To generate the frequency for the ADC Sampling  and the readout (CDSCLK2 and CP_Clk - pin PD12)
     if(Tim2_tick == 0)
     {
-      GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; // CP_Clk set to 0
+      MACRO_CIS_CLR_CPCLK;
+      //GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; // CP_Clk set to 0
     }
 
     // The CP clock is always 6 ticks (4 at low level, 2 at high level) non symetrical clock
     // since this signal is used for the AFE as CDSCLK2
     if (Tim2_tick == 5)
     {
-      GPIOD->BSRR = GPIO_PIN_12;                  // CP_Clk set to 1
+      MACRO_CIS_SET_CPCLK;
+      //GPIOD->BSRR = GPIO_PIN_12;                  // CP_Clk set to 1
       Tim2_tick = 0;
       CP_cnt++;
     }
@@ -812,18 +986,20 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
     //---CIS SP signal to set exposure duration (SP_CIS - pin PD11)
     // sensor starts acquiring immediately at the tick=2 of the timer counter
-    // The Integration time is defined by the 'expDuration_10us' variable
+    // The Integration time is defined by the 'expDuration_us' variable
     // there is no reading of the data from the sensor between these two pulses
-    if(tick_SP == 2 || tick_SP == (expDuration_10us+2) )
+    if(tick_SP == 2 || tick_SP == (expDuration_us+2) )
     {
-      GPIOD->BSRR = GPIO_PIN_11;              //-Set GPIO to 1
+      MACRO_CIS_SET_SP;
+      //GPIOD->BSRR = GPIO_PIN_11;              // SP_CIS Set to 1
     }
-    else if(tick_SP == 7 || tick_SP == (expDuration_10us+7) )
+    else if(tick_SP == 7 || tick_SP == (expDuration_us+7) )
     {
-      GPIOD->BSRR = (uint32_t)GPIO_PIN_11 << 16U; //-Set GPIO to 0
+      MACRO_CIS_CLR_SP;
+      //GPIOD->BSRR = (uint32_t)GPIO_PIN_11 << 16U; // SP_CIS Set to 0
     }
 
-    if(tick_SP == (expDuration_10us+2) )
+    if(tick_SP == (expDuration_us+2) )
     {
       CP_cnt=0;
     }
@@ -871,7 +1047,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     {
       HAL_TIM_Base_Stop_IT(&htim2);
 
-      GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; // CP_Clk set to 0
+      MACRO_CIS_CLR_CPCLK;
+      //GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; // CP_Clk set to 0
       send_data_main = 1;
       enableSampleTimerFlag = 0;
       CP_cnt = 0;
