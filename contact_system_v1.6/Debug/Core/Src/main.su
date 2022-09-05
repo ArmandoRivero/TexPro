@@ -1,0 +1,10 @@
+../Core/Src/main.c:253:5:main	10392	static,ignoring_inline_asm
+../Core/Src/main.c:685:6:SystemClock_Config	120	static
+../Core/Src/main.c:745:13:MX_SPI1_Init	8	static
+../Core/Src/main.c:793:13:MX_TIM2_Init	40	static
+../Core/Src/main.c:838:13:MX_TIM3_Init	40	static
+../Core/Src/main.c:883:13:MX_TIM4_Init	40	static
+../Core/Src/main.c:928:13:MX_GPIO_Init	64	static
+../Core/Src/main.c:1158:6:HAL_GPIO_EXTI_Callback	16	static
+../Core/Src/main.c:1178:6:HAL_TIM_PeriodElapsedCallback	16	static
+../Core/Src/main.c:1396:6:Error_Handler	4	static,ignoring_inline_asm
