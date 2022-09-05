@@ -18,7 +18,7 @@
 
 // Authors: Christian Valles, Armando Rivero, Sebastiano Marinelli
 // Date of modification: 2/09/2022
-// Version 1.4
+// Version 1.5
 
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -40,7 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 int codeVer = 1;
-int codeVerTest = 4;
+int codeVerTest = 5;
 
 int toggleLEDonBoard = 1;
 int toggleLEDonBoard_G = 1;
@@ -191,7 +191,7 @@ unsigned int ledExpDuration_G = 0;
 unsigned int ledExpDuration_B = 0;
 
 char enableSampleTimerFlag = 0;
-short int flag_enableLEDS = 0;
+short int flag_en_CIS_LED = 0;
 
 unsigned char send_data_main = 0;
 
@@ -575,13 +575,18 @@ int main(void)
 				token = strtok(NULL,tokenSeparator);
 
 				tokenVal = atoi(token);
-				if(tokenVal >= 0)
+
+				if(tokenVal > 0)
 				{
 					ledExpDuration_R = tokenVal;
+					msgVCP_len = sprintf(msgVCP, "CIS LED_R %d\n", ledExpDuration_R);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				else
 				{
 					ledExpDuration_R = 0;
+					msgVCP_len = sprintf(msgVCP, "-CIS LED_R %d\n", ledExpDuration_B);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
 			}
@@ -591,13 +596,17 @@ int main(void)
 				token = strtok(NULL,tokenSeparator);
 
 				tokenVal = atoi(token);
-				if(tokenVal >= 0)
+				if(tokenVal > 0)
 				{
 					ledExpDuration_G = tokenVal;
+					msgVCP_len = sprintf(msgVCP, "CIS LED_G %d\n", ledExpDuration_G);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				else
 				{
 					ledExpDuration_G = 0;
+					msgVCP_len = sprintf(msgVCP, "-CIS LED_G %d\n", ledExpDuration_B);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
 			}
@@ -607,13 +616,17 @@ int main(void)
 				token = strtok(NULL,tokenSeparator);
 
 				tokenVal = atoi(token);
-				if(tokenVal >= 0)
+				if(tokenVal > 0)
 				{
 					ledExpDuration_B = tokenVal;
+					msgVCP_len = sprintf(msgVCP, "CIS LED_B %d\n", ledExpDuration_B);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				else
 				{
 					ledExpDuration_B = 0;
+					msgVCP_len = sprintf(msgVCP, "-CIS LED_B %d\n", ledExpDuration_B);
+					CDC_Transmit_HS((uint8_t *)msgVCP, msgVCP_len);
 				}
 				memset (bufferVCP_Rx, '\0', 64);  // clear the VCP buffer always
 			}
@@ -675,7 +688,7 @@ int main(void)
 
 
 			//CDC_Transmit_HS((uint8_t *) "\r\n", 1);
-			HAL_TIM_Base_Start_IT(&htim2);
+			//HAL_TIM_Base_Start_IT(&htim2);
 			/*HAL_TIM_Base_Stop_IT(&htim2);   // Stop interrupt of TIM2
 
 			 */
@@ -1205,9 +1218,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 				MACRO_CIS_CLR_CPCLK;
 				//GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U; // CP_Clk set to 0
 			}
-			if (Led_cnt == 4)
+			if (Led_cnt == 4 && flag_en_CIS_LED == 0)
 			{
-				flag_enableLEDS = 1;
+				flag_en_CIS_LED = 1;
 				// store LED duration in counter for timer
 				cnt_red = ledExpDuration_R;
 				cnt_green = ledExpDuration_G;
@@ -1304,65 +1317,70 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 		}
 	}
-	//Tik every 1uS (led expsoure is in uS)
+	//Tik every 1uS (led exposure is in uS)
 	if(htim == &htim3)
 	{
-		if(flag_enableLEDS)
-		{
-//			if (toggleLEDonBoard_G == 1)
-//			{
-//					MACRO_LED_GREEN_SET
-//					toggleLEDonBoard_G = 0;
-//			}
-//			else
-//			{
-//				MACRO_LED_GREEN_CLR
-//				toggleLEDonBoard_G = 1;
-//			}
+	  if(flag_en_CIS_LED)
+	  {
+	    //			if (toggleLEDonBoard_G == 1)
+	    //			{
+	    //					MACRO_LED_GREEN_SET
+	    //					toggleLEDonBoard_G = 0;
+	    //			}
+	    //			else
+	    //			{
+	    //				MACRO_LED_GREEN_CLR
+	    //				toggleLEDonBoard_G = 1;
+	    //			}
 
-			if(cnt_red != 0)
-			{
-				MACRO_CIS_LED_RED_SET
-				cnt_red--;
-			}
-			else
-			{
-				MACRO_CIS_LED_RED_CLR
-			}
-			if(cnt_green != 0)
-			{
-				MACRO_CIS_LED_GREEN_SET
-				cnt_green--;
-			}
-			else
-			{
-				MACRO_CIS_LED_GREEN_CLR
-			}
-			if(cnt_blue != 0)
-			{
-				MACRO_CIS_LED_BLUE_SET
-				cnt_blue--;
-			}
-			else
-			{
-				MACRO_CIS_LED_BLUE_CLR
-			}
-			if(ledExpDuration_R == 0  && ledExpDuration_G== 0 && ledExpDuration_B == 0 )
-			{
-				flag_enableLEDS = 0;
-				HAL_TIM_Base_Stop_IT(&htim3); // stop timer 3
-			}
-		}
-		odr = GPIOE->ODR;
-		GPIOE->BSRR = ((odr & GPIO_PIN_3) << 16U) | (~odr & GPIO_PIN_3);
-		//Tim3_tick++;
+	    if(cnt_red==0  && cnt_green==0 && cnt_blue==0 )
+	    {
+	      flag_en_CIS_LED = 0;
+	      HAL_TIM_Base_Stop_IT(&htim3); // stop timer 3
+	    }
+
+	    if(cnt_red != 0)
+	    {
+	      MACRO_CIS_LED_RED_SET
+	      cnt_red--;
+	    }
+	    else
+	    {
+	      MACRO_LED_RED_SET
+	      MACRO_CIS_LED_RED_CLR
+	    }
+
+	    if(cnt_green != 0)
+	    {
+	      MACRO_CIS_LED_GREEN_SET
+	      cnt_green--;
+	    }
+	    else
+	    {
+	      MACRO_CIS_LED_GREEN_CLR
+	    }
+
+	    if(cnt_blue != 0)
+	    {
+	      MACRO_CIS_LED_BLUE_SET
+	      cnt_blue--;
+	    }
+	    else
+	    {
+	      MACRO_CIS_LED_BLUE_CLR
+	    }
+
+	    odr = GPIOE->ODR;
+	    GPIOE->BSRR = ((odr & GPIO_PIN_3) << 16U) | (~odr & GPIO_PIN_3);
+	  }
 	}
 
+	// Blink led as Keep Alive signal
 	if(htim == &htim4)
 	{
 		if (toggleLEDonBoard == 1)
 		{
-				MACRO_LED_RED_SET
+				MACRO_LED_RED_CLR
 				toggleLEDonBoard = 0;
 		}
 		else
